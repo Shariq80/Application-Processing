@@ -20,6 +20,10 @@ const applicationSchema = new mongoose.Schema({
   aiSummary: String,
   emailId: String,
   attachments: [attachmentSchema],
+  isShortlisted: {
+    type: Boolean,
+    default: false
+  },
   createdAt: { type: Date, default: Date.now }
 });
 
