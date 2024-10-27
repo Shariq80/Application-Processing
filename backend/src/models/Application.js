@@ -24,6 +24,10 @@ const applicationSchema = new mongoose.Schema({
     type: Boolean,
     default: false
   },
+  sentAt: {
+    type: Date,
+    default: null
+  },
   createdAt: { type: Date, default: Date.now }
 });
 

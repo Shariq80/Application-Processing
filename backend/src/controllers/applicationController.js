@@ -3,6 +3,7 @@ const openaiService = require('../services/openaiService');
 const Application = require('../models/Application');
 const Job = require('../models/Job');
 const resumeParserService = require('../services/resumeParserService');
+const mongoose = require('mongoose');
 
 exports.fetchEmails = async (req, res) => {
   try {
@@ -234,11 +235,23 @@ exports.processEmail = async (emailData, jobTitle) => {
 
 exports.getAllApplications = async (req, res) => {
   try {
-    const applications = await Application.find()
+    const { jobId } = req.query;
+    
+    // Ensure jobId is a valid ObjectId
+    if (jobId && !mongoose.Types.ObjectId.isValid(jobId)) {
+      return res.status(400).json({ error: 'Invalid job ID' });
+    }
+
+    // Build query with job filter if jobId is provided
+    const query = jobId ? { job: jobId } : {};
+
+    const applications = await Application.find(query)
       .populate('job')
       .sort('-createdAt');
+
     res.json(applications);
   } catch (error) {
+    console.error('Error fetching applications:', error);
     res.status(500).json({ error: error.message });
   }
 };
@@ -285,23 +298,19 @@ exports.downloadAttachment = async (req, res) => {
 
 exports.toggleShortlist = async (req, res) => {
   try {
-    console.log('toggleShortlist called with params:', req.params);
-    
     const application = await Application.findById(req.params.id);
-    console.log('Found application:', application ? 'yes' : 'no');
     
     if (!application) {
-      console.log('Application not found for ID:', req.params.id);
       return res.status(404).json({ error: 'Application not found' });
     }
 
     application.isShortlisted = !application.isShortlisted;
-    console.log('Toggling shortlist status to:', application.isShortlisted);
-    
     await application.save();
-    console.log('Application saved successfully');
-
-    res.json(application);
+    
+    res.json({ 
+      isShortlisted: application.isShortlisted,
+      message: `Application ${application.isShortlisted ? 'shortlisted' : 'removed from shortlist'}`
+    });
   } catch (error) {
     console.error('Error in toggleShortlist:', error);
     res.status(500).json({ error: error.message });
@@ -317,25 +326,22 @@ exports.sendShortlistedApplications = async (req, res) => {
     console.log('2. Extracted jobId:', jobId);
     
     if (!jobId) {
-      console.log('3. Error: No jobId provided');
-      return res.status(400).json({ error: 'jobId is required' });
+      throw new Error('Job ID is required');
     }
 
-    console.log('4. Finding shortlisted applications...');
+    // Find all shortlisted but unsent applications for this job
     const applications = await Application.find({
       job: jobId,
-      isShortlisted: true
+      isShortlisted: true,
+      sentAt: null
     }).populate('job');
-    
-    console.log('5. Found applications:', {
-      count: applications.length,
-      applicationIds: applications.map(app => app._id)
-    });
 
-    if (applications.length === 0) {
-      console.log('6. Error: No shortlisted applications found');
-      return res.status(400).json({ error: 'No shortlisted applications found' });
+    if (!applications.length) {
+      throw new Error('No unsent shortlisted applications found');
     }
+
+    // Get Gmail client
+    const gmail = await gmailService.getAuthorizedClient();
 
     // Create HTML content for email
     const htmlContent = `
@@ -347,43 +353,92 @@ exports.sendShortlistedApplications = async (req, res) => {
           <p><strong>AI Score:</strong> ${app.aiScore}/10</p>
           <p><strong>AI Summary:</strong> ${app.aiSummary}</p>
           <p><strong>Date Received:</strong> ${new Date(app.createdAt).toLocaleDateString()}</p>
-          ${app.attachments.length > 0 ? `
-            <p><strong>Attachments:</strong></p>
-            <ul>
-              ${app.attachments.map(att => `
-                <li>${att.filename || 'Unnamed attachment'} (${att.contentType})</li>
-              `).join('')}
-            </ul>
-          ` : '<p><em>No attachments</em></p>'}
-          <p><strong>Original Email:</strong></p>
+          <p><strong>Email Body:</strong></p>
           <div style="margin-left: 20px;">${app.emailBody}</div>
         </div>
       `).join('')}
     `;
 
-    // Get all attachments
-    const attachments = applications.flatMap(app => 
-      app.attachments.map(att => ({
-        filename: `${app.applicantName}_${att.filename}`,
-        contentType: att.contentType,
-        data: att.data
-      }))
-    );
+    // Create message with attachments
+    const boundary = 'boundary' + Date.now().toString();
+    const message = [
+      `Content-Type: multipart/mixed; boundary=${boundary}`,
+      'MIME-Version: 1.0',
+      `To: ${req.user.email}`,  // Use the authenticated user's email from req.user
+      `Subject: Shortlisted Applications for ${applications[0].job.title}`,
+      '',
+      `--${boundary}`,
+      'Content-Type: text/html; charset=utf-8',
+      '',
+      htmlContent
+    ];
 
-    // Send email
-    await gmailService.sendEmail(
-      req.user.email,
-      `Shortlisted Candidates - ${applications[0].job.title}`,
-      htmlContent,
-      attachments
-    );
+    // Add attachments
+    for (const app of applications) {
+      for (const attachment of app.attachments) {
+        message.push(
+          `--${boundary}`,
+          `Content-Type: ${attachment.contentType}`,
+          'Content-Transfer-Encoding: base64',
+          `Content-Disposition: attachment; filename="${attachment.filename}"`,
+          '',
+          attachment.data.toString('base64')
+        );
+      }
+    }
 
-    res.json({ message: 'Shortlisted applications sent successfully' });
-  } catch (error) {
-    console.error('Error in sendShortlistedApplications:', {
-      error: error.message,
-      stack: error.stack
+    message.push(`--${boundary}--`);
+
+    // Encode and send the email
+    const encodedMessage = Buffer.from(message.join('\r\n'))
+      .toString('base64')
+      .replace(/\+/g, '-')
+      .replace(/\//g, '_')
+      .replace(/=+$/, '');
+
+    await gmail.users.messages.send({
+      userId: 'me',
+      requestBody: {
+        raw: encodedMessage
+      }
     });
+
+    // Update sentAt for all applications
+    const updatedApplications = await Promise.all(
+      applications.map(async (app) => {
+        app.sentAt = new Date();
+        await app.save();
+        return {
+          id: app._id,
+          sentAt: app.sentAt
+        };
+      })
+    );
+
+    res.json({
+      message: 'Applications sent successfully',
+      sentCount: applications.length,
+      updatedApplications
+    });
+  } catch (error) {
+    console.error('Error in sendShortlistedApplications:', error);
     res.status(500).json({ error: error.message });
   }
 };
+
+exports.deleteApplication = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const deletedApplication = await Application.findByIdAndDelete(id);
+    
+    if (!deletedApplication) {
+      return res.status(404).json({ error: 'Application not found' });
+    }
+
+    res.json({ message: 'Application deleted successfully' });
+  } catch (error) {
+    console.error('Error deleting application:', error);
+    res.status(500).json({ error: error.message });
+  }
+};
+

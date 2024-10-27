@@ -1,4 +1,6 @@
 const Job = require('../models/Job');
+const Application = require('../models/Application');  // Add this import
+const mongoose = require('mongoose');
 
 exports.createJob = async (req, res) => {
   try {
@@ -55,15 +57,39 @@ exports.updateJob = async (req, res) => {
 
 exports.deleteJob = async (req, res) => {
   try {
-    const job = await Job.findOneAndDelete({ 
-      _id: req.params.id, 
-      createdBy: req.user._id 
-    });
-    if (!job) {
-      return res.status(404).json({ error: 'Job not found' });
+    const { id } = req.params;
+    const { deleteApplications } = req.query;
+    
+    console.log('Deleting job:', id, 'with applications:', deleteApplications);
+
+    const session = await mongoose.startSession();
+    session.startTransaction();
+
+    try {
+      const deletedJob = await Job.findByIdAndDelete(id).session(session);
+      console.log('Deleted job:', deletedJob);
+      
+      if (!deletedJob) {
+        throw new Error('Job not found');
+      }
+
+      if (deleteApplications === 'true') {
+        const result = await Application.deleteMany({ job: id }).session(session);
+        console.log('Deleted applications:', result);
+      }
+
+      await session.commitTransaction();
+      session.endSession();
+
+      res.json({ message: 'Job deleted successfully' });
+    } catch (error) {
+      console.error('Transaction error:', error);
+      await session.abortTransaction();
+      session.endSession();
+      throw error;
     }
-    res.json({ message: 'Job deleted successfully' });
   } catch (error) {
+    console.error('Delete job error:', error);
     res.status(500).json({ error: error.message });
   }
 };
