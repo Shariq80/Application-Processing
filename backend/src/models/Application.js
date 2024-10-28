@@ -28,7 +28,11 @@ const applicationSchema = new mongoose.Schema({
     type: Date,
     default: null
   },
-  createdAt: { type: Date, default: Date.now }
+  createdAt: { type: Date, default: Date.now },
+  emailMetadata: {
+    messageId: String,
+    threadId: String
+  }
 });
 
 module.exports = mongoose.model('Application', applicationSchema);

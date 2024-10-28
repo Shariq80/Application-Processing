@@ -9,27 +9,32 @@ class OpenAIService {
 
   async scoreResume(resumeText, jobDescription) {
     try {
-      // Clean up the input text
       const cleanedResumeText = resumeText.replace(/No resume text available/g, '').trim();
       
+      if (!cleanedResumeText || !jobDescription) {
+        return {
+          score: 0,
+          summary: 'Unable to analyze - missing resume or job description'
+        };
+      }
+
       const prompt = `
-        Analyze this resume against the job description and respond with ONLY a JSON object containing:
-        - score: number between 1-10
-        - summary: brief 2-line summary
+        Analyze this resume against the job description and provide a JSON response in this exact format:
+        {"score": <number between 1-10>, "summary": "<brief 2-line summary>"}
         
         Job Description:
         ${jobDescription}
 
         Resume Text:
-        ${cleanedResumeText || 'No resume content provided'}
+        ${cleanedResumeText}
       `;
 
       const completion = await this.openai.chat.completions.create({
-        model: "gpt-4o-mini",
+        model: "gpt-3.5-turbo",
         messages: [
           {
             role: "system",
-            content: "You are an HR professional. Respond only with valid JSON containing 'score' and 'summary' fields."
+            content: "You are an HR professional. Respond with valid JSON only, using double quotes for property names and string values."
           },
           {
             role: "user",
@@ -39,24 +44,29 @@ class OpenAIService {
         temperature: 0.7,
         max_tokens: 150
       });
-
-      let responseText = completion.choices[0].message.content;
       
-      // Clean up the response to ensure valid JSON
+      let responseText = completion.choices[0].message.content;
+      // Clean up any markdown formatting or extra whitespace
       responseText = responseText.replace(/```json\n?|\n?```/g, '').trim();
       
-      const response = JSON.parse(responseText);
-      
-      return {
-        score: response.score || 5, // Default score if missing
-        summary: response.summary || 'Unable to generate summary'
-      };
+      try {
+        const response = JSON.parse(responseText);
+        return {
+          score: response.score || 5,
+          summary: response.summary || 'Unable to generate summary'
+        };
+      } catch (parseError) {
+        console.error('Failed to parse OpenAI response:', responseText);
+        return {
+          score: 5,
+          summary: 'Error parsing AI response'
+        };
+      }
     } catch (error) {
       console.error('OpenAI scoring error:', error);
-      // Return default values instead of throwing
       return {
         score: 0,
-        summary: 'Failed to analyze resume'
+        summary: 'Error analyzing resume: ' + error.message
       };
     }
   }

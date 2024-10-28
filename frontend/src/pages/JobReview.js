@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useParams } from 'react-router-dom';
 import { toast } from 'react-hot-toast';
 import api from '../services/api';
@@ -17,26 +17,26 @@ export default function JobReview() {
   const [processing, setProcessing] = useState(false);
   const [error, setError] = useState(null);
 
-  useEffect(() => {
-    fetchJobAndApplications();
-  }, [fetchJobAndApplications]);
-
-  const fetchJobAndApplications = async () => {
+  const fetchJobAndApplications = useCallback(async () => {
     try {
       setError(null);
       const [jobRes, appsRes] = await Promise.all([
         api.get(`/jobs/${id}`),
-        api.get(`/applications?jobId=${id}`)  // Update API endpoint to filter by jobId
+        api.get(`/applications?jobId=${id}`)
       ]);
       setJob(jobRes.data);
-      setApplications(appsRes.data);  // No need to filter here as backend will send only relevant applications
+      setApplications(appsRes.data);
     } catch (error) {
       setError('Failed to load job and applications');
       toast.error('Failed to load data');
     } finally {
       setLoading(false);
     }
-  };
+  }, [id]);
+
+  useEffect(() => {
+    fetchJobAndApplications();
+  }, [fetchJobAndApplications]);
 
   const handleFetchEmails = async () => {
     if (!job?.title) return;

@@ -35,6 +35,11 @@ export default function ApplicationsTable({ applications, onViewDetails, onToggl
       <ChevronDownIcon className="h-4 w-4 inline-block ml-1" />;
   };
 
+  const getEmailOnly = (fullEmail) => {
+    const matches = fullEmail.match(/<(.+?)>/);
+    return matches ? matches[1] : fullEmail;
+  };
+
   return (
     <div className="overflow-x-auto">
       <table className="min-w-full divide-y divide-gray-300">
@@ -85,7 +90,7 @@ export default function ApplicationsTable({ applications, onViewDetails, onToggl
                 {new Date(app.createdAt).toLocaleDateString()}
               </td>
               <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500">
-                {app.applicantEmail}
+                {getEmailOnly(app.applicantEmail)}
               </td>
               <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500">
                 <span className={`px-2 py-1 rounded ${

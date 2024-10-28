@@ -24,57 +24,95 @@ exports.fetchEmails = async (req, res) => {
     }
 
     const gmail = await gmailService.getAuthorizedClient();
-
-
-    const emails = response.data.messages || [];
     
+    // Search for unread emails with attachments
+    const searchQuery = `has:attachment`;
+    const messagesResponse = await gmail.users.messages.list({
+      userId: 'me',
+      q: searchQuery,
+      labelIds: ['UNREAD']
+    });
+
+    const messages = messagesResponse.data.messages || [];
     const processedEmails = [];
 
-    for (const email of emails) {
+    // Get all existing message IDs for this job to avoid reprocessing
+    const existingMessageIds = await Application.distinct('emailMetadata.messageId', {
+      job: existingJob._id
+    });
 
+    for (const message of messages) {
       try {
-        const processedEmail = await this.processEmail(emailData.data, jobTitle);
-        processedEmails.push(processedEmail);
-        console.log('Email processed successfully:', email.id);
+        // Skip if already processed
+        if (existingMessageIds.includes(message.id)) {
+          continue;
+        }
 
-        await gmail.users.messages.modify({
+        const messageData = await gmail.users.messages.get({
           userId: 'me',
-          id: email.id,
-          requestBody: {
-            removeLabelIds: ['UNREAD']
-          }
+          id: message.id,
+          format: 'full'
         });
-        console.log('Email marked as read:', email.id);
+
+        const headers = messageData.data.payload.headers;
+        const subject = headers.find(h => h.name === 'Subject')?.value || '';
+
+        if (!subject.toLowerCase().includes(jobTitle.toLowerCase())) {
+          continue;
+        }
+
+        const processedEmail = await this.processEmail(messageData.data, jobTitle);
+        if (processedEmail) {
+          processedEmail.emailMetadata = {
+            messageId: message.id,
+            threadId: messageData.data.threadId
+          };
+          await processedEmail.save();
+          
+          processedEmails.push(processedEmail);
+          
+          await gmail.users.messages.modify({
+            userId: 'me',
+            id: message.id,
+            requestBody: {
+              removeLabelIds: ['UNREAD']
+            }
+          });
+          console.log(`Successfully processed and marked as read: ${message.id}`);
+        }
       } catch (error) {
         console.error('Failed to process email:', {
-          emailId: email.id,
+          messageId: message.id,
           error: error.message,
           stack: error.stack
         });
-        continue;
       }
     }
 
-    console.log('\n=== Completed fetchEmails ===');
-    console.log('Successfully processed', processedEmails.length, 'out of', emails.length, 'emails');
-    
-    res.json({ success: true, applications: processedEmails });
-  } catch (error) {
-    console.error('Fatal error in fetchEmails:', {
-      error: error.message,
-      stack: error.stack
+    res.json({ 
+      success: true, 
+      applications: processedEmails,
+      processed: processedEmails.length,
+      total: messages.length
     });
-    res.status(500).json({ error: error.message });
+
+  } catch (error) {
+    console.error('Error in fetchEmails:', error);
+    res.status(500).json({ error: error.message || 'Failed to fetch emails' });
   }
 };
 
 exports.processEmail = async (emailData, jobTitle) => {
-  console.log('\n=== Starting processEmail ===');
   try {
-    const headers = emailData.payload.headers;
-    const subject = headers.find(h => h.name === 'Subject').value;
-    const from = headers.find(h => h.name === 'From').value;
+    console.log('=== Starting processEmail ===');
     
+    const headers = emailData.payload.headers;
+    const subject = headers.find(h => h.name === 'Subject')?.value;
+    const from = headers.find(h => h.name === 'From')?.value;
+    
+    if (!subject || !from) {
+      throw new Error('Missing required email headers');
+    }
 
     if (!subject.toLowerCase().includes(jobTitle.toLowerCase())) {
       throw new Error('Job title not found in subject');
@@ -82,7 +120,7 @@ exports.processEmail = async (emailData, jobTitle) => {
 
     const job = await Job.findOne({ 
       title: { $regex: new RegExp(jobTitle, 'i') }
-    });
+    }).select('title description'); // Add description to the query
     
     if (!job) {
       throw new Error(`No matching job found for title: ${jobTitle}`);
@@ -99,99 +137,67 @@ exports.processEmail = async (emailData, jobTitle) => {
           part.filename.endsWith('.doc') || 
           part.filename.endsWith('.docx')
         )) {
+          if (!part.body?.attachmentId) {
+            console.warn('Missing attachment ID for file:', part.filename);
+            continue;
+          }
 
-          if (part.body.attachmentId) {
-            try {
-              // Get attachment data from Gmail
-              const gmail = await gmailService.getAuthorizedClient();
-              const attachment = await gmail.users.messages.attachments.get({
-                userId: 'me',
-                messageId: emailData.id,
-                id: part.body.attachmentId
+          try {
+            const gmail = await gmailService.getAuthorizedClient();
+            const attachment = await gmail.users.messages.attachments.get({
+              userId: 'me',
+              messageId: emailData.id,
+              id: part.body.attachmentId
+            });
+
+            if (attachment?.data?.data) {
+              const attachmentData = Buffer.from(attachment.data.data, 'base64');
+              attachments.push({
+                filename: part.filename,
+                contentType: part.mimeType,
+                data: attachmentData
               });
 
-              if (attachment?.data?.data) {
-                // Store attachment metadata and binary data
-                attachments.push({
-                  filename: part.filename,
-                  contentType: part.mimeType,
-                  data: Buffer.from(attachment.data.data, 'base64'),
-                  attachmentId: part.body.attachmentId
-                });
-
-                // Parse resume text
-                const buffer = Buffer.from(attachment.data.data, 'base64');
-                const text = await resumeParserService.parseResume(buffer, part.mimeType);
-                if (text && text.trim()) {
-                  resumeText = text;
-                  break; // Use the first successfully parsed resume
-                }
+              // Get resume text for the first attachment only
+              if (!resumeText) {
+                resumeText = await resumeParserService.parseResume(attachmentData, part.filename);
               }
-            } catch (err) {
-              console.error('Resume processing error:', err);
-              // Continue to next attachment if one fails
             }
+          } catch (error) {
+            console.error('Failed to process attachment:', {
+              filename: part.filename,
+              error: error.message
+            });
           }
         }
       }
     }
 
-    // Extract email body
-    let emailBody = '';
-    if (emailData.payload.body && emailData.payload.body.data) {
-      // For simple emails
-      emailBody = Buffer.from(emailData.payload.body.data, 'base64').toString();
-    } else if (emailData.payload.parts) {
-      // For multipart emails
-      const textPart = emailData.payload.parts.find(
-        part => part.mimeType === 'text/plain' || part.mimeType === 'text/html'
-      );
-      if (textPart && textPart.body.data) {
-        emailBody = Buffer.from(textPart.body.data, 'base64').toString();
-      } else {
-        // Try to find nested parts
-        for (const part of emailData.payload.parts) {
-          if (part.parts) {
-            const nestedTextPart = part.parts.find(
-              p => p.mimeType === 'text/plain' || p.mimeType === 'text/html'
-            );
-            if (nestedTextPart && nestedTextPart.body.data) {
-              emailBody = Buffer.from(nestedTextPart.body.data, 'base64').toString();
-              break;
-            }
-          }
-        }
-      }
+    if (attachments.length === 0) {
+      throw new Error('No valid attachments found');
     }
-    
-    // Use placeholder if body is empty
-    emailBody = emailBody.trim() || 'No email body content available';
 
-    // Combine resume text and email body for better analysis
-    const textForAnalysis = [
-      resumeText || 'No resume text available',
-      emailBody || 'No email body available'
-    ].join('\n\n');
+    // Get AI score and summary
+    const aiResult = await openaiService.scoreResume(resumeText, job.description);
 
-    // Get AI scoring
-    const aiResult = await openaiService.scoreResume(textForAnalysis, job.description);
-
-    // Create application
+    // Create application record
     const application = new Application({
       job: job._id,
+      applicantEmail: from,
       applicantName: from.split('<')[0].trim(),
-      applicantEmail: from.match(/<(.+)>/)[1],
-      resumeText: resumeText || 'No resume text available',
-      emailBody: emailBody,
+      emailSubject: subject,
+      emailBody: emailData.snippet || '',
+      attachments: attachments,
+      resumeText: resumeText,
       aiScore: aiResult.score,
-      aiSummary: aiResult.summary,
-      emailId: emailData.id,
-      attachments
+      aiSummary: aiResult.summary
     });
 
     await application.save();
     return application;
+
   } catch (error) {
+    console.error('Error in processEmail:', error);
     throw error;
   }
 };
@@ -376,6 +382,8 @@ exports.sendShortlistedApplications = async (req, res) => {
       })
     );
 
+    console.log(`Successfully sent ${applications.length} shortlisted applications for job: ${applications[0].job.title}`);
+
     res.json({
       message: 'Applications sent successfully',
       sentCount: applications.length,
@@ -402,4 +410,3 @@ exports.deleteApplication = async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 };
-

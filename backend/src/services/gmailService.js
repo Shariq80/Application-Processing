@@ -4,14 +4,12 @@ const resumeParserService = require('./resumeParserService');
 
 class GmailService {
   constructor() {
-    this.oauth2Client = new google.auth.OAuth2(
-      process.env.GOOGLE_CLIENT_ID,
-      process.env.GOOGLE_CLIENT_SECRET,
-      process.env.GOOGLE_REDIRECT_URI
-    );
+    this.oauth2Client = null;
+    this.gmail = null;
   }
 
   async getAuthUrl() {
+    this.initializeOAuth2Client();
     const scopes = [
       'https://www.googleapis.com/auth/gmail.readonly',
       'https://www.googleapis.com/auth/gmail.modify',
@@ -24,6 +22,18 @@ class GmailService {
       prompt: 'consent',
       include_granted_scopes: true
     });
+  }
+
+  initializeOAuth2Client() {
+    if (!this.oauth2Client) {
+      this.oauth2Client = new google.auth.OAuth2(
+        process.env.GOOGLE_CLIENT_ID,
+        process.env.GOOGLE_CLIENT_SECRET,
+        process.env.GOOGLE_REDIRECT_URI
+      );
+      // Increase max listeners
+      this.oauth2Client.setMaxListeners(20);
+    }
   }
 
   async handleCallback(code) {
@@ -104,22 +114,35 @@ class GmailService {
   }
 
   async getAuthorizedClient() {
-    const credentials = await OAuthCredential.getCredentials();
-    
-    this.oauth2Client.setCredentials({
-      access_token: credentials.access_token,
-      refresh_token: credentials.refresh_token,
-      expiry_date: credentials.expiry_date,
-    });
-
-    // Set up token refresh handler
-    this.oauth2Client.on('tokens', async (tokens) => {
-      if (tokens.refresh_token) {
-        await this.saveTokens(tokens);
+    try {
+      if (this.gmail) {
+        return this.gmail;
       }
-    });
 
-    return google.gmail({ version: 'v1', auth: this.oauth2Client });
+      this.initializeOAuth2Client();
+      const credentials = await OAuthCredential.getCredentials();
+      
+      this.oauth2Client.setCredentials({
+        access_token: credentials.access_token,
+        refresh_token: credentials.refresh_token,
+        expiry_date: credentials.expiry_date,
+      });
+
+      // Set up token refresh handler only once
+      if (!this.oauth2Client.listenerCount('tokens')) {
+        this.oauth2Client.on('tokens', async (tokens) => {
+          if (tokens.refresh_token) {
+            await this.saveTokens(tokens);
+          }
+        });
+      }
+
+      this.gmail = google.gmail({ version: 'v1', auth: this.oauth2Client });
+      return this.gmail;
+    } catch (error) {
+      console.error('Error getting authorized client:', error);
+      throw error;
+    }
   }
 
 
