@@ -12,12 +12,12 @@ exports.login = async (req, res) => {
     }
 
     const token = jwt.sign(
-      { userId: user._id, role: user.role },
+      { userId: user._id },
       process.env.JWT_SECRET,
       { expiresIn: '24h' }
     );
 
-    res.json({ token, user: { id: user._id, name: user.name, email: user.email, role: user.role } });
+    res.json({ token, user: { id: user._id, name: user.name, email: user.email } });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -47,7 +47,6 @@ exports.getGoogleAuthUrl = async (req, res) => {
 
 exports.handleGoogleCallback = async (req, res) => {
   const requestId = Date.now(); // Add request ID for tracking
-  console.log(`Starting Google callback handler [${requestId}]`);
   
   try {
     const { code } = req.query;
@@ -61,7 +60,6 @@ exports.handleGoogleCallback = async (req, res) => {
 
     const tokens = await gmailService.handleCallback(code);
     
-    console.log(`Completed Google callback handler [${requestId}]`);
     res.json({ 
       success: true, 
       message: 'Google OAuth successful. Gmail access granted.',

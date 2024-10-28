@@ -4,7 +4,6 @@ const mammoth = require('mammoth');
 class ResumeParserService {
   async parseResume(buffer, fileType) {
     try {
-      console.log(`Parsing resume with type: ${fileType}`);
       let text = '';
       
       if (fileType === 'application/pdf') {
@@ -18,7 +17,6 @@ class ResumeParserService {
       }
 
       const cleanedText = this.cleanText(text);
-      console.log(`Parsed text length: ${cleanedText.length} characters`);
       return cleanedText;
     } catch (error) {
       console.error('Resume parsing error:', error);

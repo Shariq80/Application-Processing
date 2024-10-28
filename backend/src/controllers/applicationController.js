@@ -8,8 +8,6 @@ const mongoose = require('mongoose');
 exports.fetchEmails = async (req, res) => {
   try {
     const { jobTitle } = req.query;
-    console.log('\n=== Starting fetchEmails ===');
-    console.log('1. Searching for job title:', jobTitle);
     
     if (!jobTitle) {
       return res.status(400).json({ error: 'Job title is required' });
@@ -18,11 +16,6 @@ exports.fetchEmails = async (req, res) => {
     const existingJob = await Job.findOne({ 
       title: { $regex: new RegExp(jobTitle, 'i') }
     });
-    console.log('2. Job search result:', existingJob ? {
-      id: existingJob._id,
-      title: existingJob.title,
-      description: existingJob.description?.substring(0, 50) + '...'
-    } : 'No job found');
     
     if (!existingJob) {
       return res.status(404).json({ 
@@ -30,32 +23,14 @@ exports.fetchEmails = async (req, res) => {
       });
     }
 
-    console.log('3. Getting authorized Gmail client...');
     const gmail = await gmailService.getAuthorizedClient();
-    
-    console.log('4. Fetching unread emails...');
-    const response = await gmail.users.messages.list({
-      userId: 'me',
-      q: `is:unread ${jobTitle}`
-    });
 
-    console.log('5. Gmail response:', {
-      resultSizeEstimate: response.data.resultSizeEstimate,
-      messagesCount: response.data.messages?.length || 0
-    });
 
     const emails = response.data.messages || [];
     
     const processedEmails = [];
-    console.log('6. Processing', emails.length, 'emails...');
 
     for (const email of emails) {
-      console.log('\n--- Processing email:', email.id, '---');
-      const emailData = await gmail.users.messages.get({
-        userId: 'me',
-        id: email.id,
-        format: 'full'
-      });
 
       try {
         const processedEmail = await this.processEmail(emailData.data, jobTitle);
@@ -100,17 +75,11 @@ exports.processEmail = async (emailData, jobTitle) => {
     const subject = headers.find(h => h.name === 'Subject').value;
     const from = headers.find(h => h.name === 'From').value;
     
-    console.log('1. Email details:', {
-      subject,
-      from,
-      jobTitle
-    });
 
     if (!subject.toLowerCase().includes(jobTitle.toLowerCase())) {
       throw new Error('Job title not found in subject');
     }
 
-    console.log('2. Finding job in database...');
     const job = await Job.findOne({ 
       title: { $regex: new RegExp(jobTitle, 'i') }
     });
@@ -118,7 +87,6 @@ exports.processEmail = async (emailData, jobTitle) => {
     if (!job) {
       throw new Error(`No matching job found for title: ${jobTitle}`);
     }
-    console.log('3. Found matching job:', job.title);
 
     // Process attachments
     const attachments = [];
@@ -131,11 +99,6 @@ exports.processEmail = async (emailData, jobTitle) => {
           part.filename.endsWith('.doc') || 
           part.filename.endsWith('.docx')
         )) {
-          console.log('Processing attachment:', {
-            filename: part.filename,
-            mimeType: part.mimeType,
-            hasAttachmentId: !!part.body.attachmentId
-          });
 
           if (part.body.attachmentId) {
             try {
@@ -320,10 +283,8 @@ exports.toggleShortlist = async (req, res) => {
 exports.sendShortlistedApplications = async (req, res) => {
   try {
     console.log('\n=== Starting sendShortlistedApplications ===');
-    console.log('1. Request body:', req.body);
     
     const { jobId } = req.body;
-    console.log('2. Extracted jobId:', jobId);
     
     if (!jobId) {
       throw new Error('Job ID is required');

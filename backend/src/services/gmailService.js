@@ -28,7 +28,6 @@ class GmailService {
 
   async handleCallback(code) {
     try {
-      console.log('1. Starting OAuth callback with code:', code.substring(0, 10) + '...');
 
       if (!code) {
         throw new Error('Authorization code is required');
@@ -37,7 +36,6 @@ class GmailService {
       // Check if we already have valid credentials
       const existingCreds = await OAuthCredential.findOne({});
       if (existingCreds && existingCreds.access_token) {
-        console.log('Found existing valid credentials, skipping token exchange');
         return {
           access_token: existingCreds.access_token,
           refresh_token: existingCreds.refresh_token,
@@ -48,7 +46,6 @@ class GmailService {
       }
 
       // Clear any existing credentials
-      console.log('2. Creating new OAuth2 client...');
       this.oauth2Client = new google.auth.OAuth2(
         process.env.GOOGLE_CLIENT_ID,
         process.env.GOOGLE_CLIENT_SECRET,
@@ -56,55 +53,30 @@ class GmailService {
       );
 
       // Get tokens
-      console.log('3. Attempting to exchange code for tokens...');
       const { tokens } = await this.oauth2Client.getToken(code);
       
-      console.log('4. Token exchange response:', {
-        hasAccessToken: !!tokens.access_token,
-        hasRefreshToken: !!tokens.refresh_token,
-        tokenType: tokens.token_type,
-        expiryDate: tokens.expiry_date ? new Date(tokens.expiry_date).toISOString() : 'none',
-        scopeLength: tokens.scope?.length || 0
-      });
 
       if (!tokens.access_token) {
         throw new Error('No access token received');
       }
 
       // Save tokens first
-      console.log('5. Saving tokens to database...');
       await this.saveTokens(tokens);
 
       // Verify saved tokens
-      console.log('6. Verifying saved credentials...');
       const savedCreds = await OAuthCredential.findOne({});
-      console.log('7. Saved credentials check:', {
-        hasAccessToken: !!savedCreds?.access_token,
-        hasRefreshToken: !!savedCreds?.refresh_token,
-        savedExpiryDate: savedCreds?.expiry_date ? new Date(savedCreds.expiry_date).toISOString() : 'none'
-      });
 
       // Then set credentials
-      console.log('8. Setting credentials on OAuth2 client...');
       this.oauth2Client.setCredentials(tokens);
       
       return tokens;
     } catch (error) {
-      console.error('OAuth Error Details:', {
-        errorName: error.name,
-        errorMessage: error.message,
-        errorCode: error.code,
-        responseData: error.response?.data,
-        responseStatus: error.response?.status,
-        stack: error.stack // Adding stack trace for better debugging
-      });
 
       if (error.message.includes('invalid_grant')) {
         // Don't clear credentials if we already have valid ones
         const existingCreds = await OAuthCredential.findOne({});
         if (!existingCreds || !existingCreds.access_token) {
           await OAuthCredential.deleteMany({});
-          console.log('9. Cleared existing credentials due to invalid_grant error');
         }
         throw new Error('Authorization code expired or already used. Please start the OAuth process again if needed.');
       }
@@ -113,7 +85,6 @@ class GmailService {
   }
 
   async saveTokens(tokens) {
-    console.log('SaveTokens: Starting token save...');
     try {
       const result = await OAuthCredential.findOneAndUpdate(
         {}, 
@@ -126,11 +97,6 @@ class GmailService {
         },
         { upsert: true, new: true }
       );
-      console.log('SaveTokens: Successfully saved tokens:', {
-        hasAccessToken: !!result.access_token,
-        hasRefreshToken: !!result.refresh_token,
-        savedAt: result.updatedAt
-      });
     } catch (error) {
       console.error('SaveTokens Error:', error);
       throw error;
