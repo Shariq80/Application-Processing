@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect } from 'react';
+import { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { getStoredToken, setStoredToken, removeStoredToken } from '../services/storage';
 import api from '../services/api';
 
@@ -8,18 +8,21 @@ export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    const token = getStoredToken();
-    if (token) {
-      api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
-      checkAuthStatus();
-    } else {
-      setLoading(false);
-    }
-  }, []);
+  const logout = () => {
+    removeStoredToken();
+    delete api.defaults.headers.common['Authorization'];
+    setUser(null);
+  };
 
-  const checkAuthStatus = async () => {
+  const checkAuthStatus = useCallback(async () => {
     try {
+      const token = getStoredToken();
+      if (!token) {
+        setLoading(false);
+        return;
+      }
+      
+      api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
       const response = await api.get('/auth/check');
       setUser(response.data);
     } catch (error) {
@@ -27,7 +30,11 @@ export const AuthProvider = ({ children }) => {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    checkAuthStatus();
+  }, [checkAuthStatus]);
 
   const login = async (email, password) => {
     const response = await api.post('/auth/login', { email, password });
@@ -36,12 +43,6 @@ export const AuthProvider = ({ children }) => {
     api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
     setUser(user);
     return user;
-  };
-
-  const logout = () => {
-    removeStoredToken();
-    delete api.defaults.headers.common['Authorization'];
-    setUser(null);
   };
 
   return (

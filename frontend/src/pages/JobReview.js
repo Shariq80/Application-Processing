@@ -19,7 +19,7 @@ export default function JobReview() {
 
   useEffect(() => {
     fetchJobAndApplications();
-  }, [id]);
+  }, [fetchJobAndApplications]);
 
   const fetchJobAndApplications = async () => {
     try {
@@ -121,7 +121,6 @@ export default function JobReview() {
   // Update the helper function
   const hasUnsentShortlistedApplications = () => {
     const unsentCount = applications.filter(app => app.isShortlisted && !app.sentAt).length;
-    console.log('Unsent shortlisted applications:', unsentCount);
     return unsentCount > 0;
   };
 

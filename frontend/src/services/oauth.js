@@ -1,5 +1,3 @@
-import api from './api';
-
 export const handleOAuthCallback = (callback) => {
   const messageHandler = async (event) => {
     if (event.origin !== window.location.origin) return;

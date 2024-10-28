@@ -4,7 +4,6 @@ import api from '../services/api';
 import JobFormModal from '../components/Jobs/JobFormModal';
 import EditJobModal from '../components/Jobs/EditJobModal';
 import DeleteConfirmModal from '../components/Applications/DeleteConfirmModal';
-import Button from '../components/Common/Button';
 import { toast } from 'react-hot-toast';
 import { handleOAuthCallback } from '../services/oauth';
 
@@ -27,7 +26,6 @@ export default function Dashboard() {
         api.get('/applications')
       ]);
       
-      // Add application count to each job
       const jobsWithCount = jobsRes.data.map(job => ({
         ...job,
         applicationCount: appsRes.data.filter(app => 
@@ -86,6 +84,31 @@ export default function Dashboard() {
     }
   };
   
+  if (loading) {
+    return (
+      <div className="flex justify-center items-center h-screen">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600" />
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <div className="text-center">
+          <h3 className="text-lg font-medium text-gray-900">Error Loading Jobs</h3>
+          <p className="mt-1 text-sm text-gray-500">{error}</p>
+          <button
+            onClick={fetchJobs}
+            className="mt-4 inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-indigo-600 hover:bg-indigo-700"
+          >
+            Retry
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
       <div className="sm:flex sm:items-center">
