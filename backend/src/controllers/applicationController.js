@@ -61,7 +61,7 @@ exports.fetchEmails = async (req, res) => {
           continue;
         }
 
-        const processedEmail = await this.processEmail(messageData.data, jobTitle);
+        const processedEmail = await this.processEmail(messageData.data, jobTitle, req.user._id);
         if (processedEmail) {
           processedEmail.emailMetadata = {
             messageId: message.id,
@@ -102,7 +102,7 @@ exports.fetchEmails = async (req, res) => {
   }
 };
 
-exports.processEmail = async (emailData, jobTitle) => {
+exports.processEmail = async (emailData, jobTitle, userId) => {
   try {
     console.log('=== Starting processEmail ===');
     
@@ -190,7 +190,8 @@ exports.processEmail = async (emailData, jobTitle) => {
       attachments: attachments,
       resumeText: resumeText,
       aiScore: aiResult.score,
-      aiSummary: aiResult.summary
+      aiSummary: aiResult.summary,
+      processedBy: userId
     });
 
     await application.save();
@@ -205,22 +206,19 @@ exports.processEmail = async (emailData, jobTitle) => {
 exports.getAllApplications = async (req, res) => {
   try {
     const { jobId } = req.query;
+    const query = { processedBy: req.user._id };
     
-    // Ensure jobId is a valid ObjectId
-    if (jobId && !mongoose.Types.ObjectId.isValid(jobId)) {
-      return res.status(400).json({ error: 'Invalid job ID' });
+    if (jobId) {
+      query.job = jobId;
     }
-
-    // Build query with job filter if jobId is provided
-    const query = jobId ? { job: jobId } : {};
-
+    
     const applications = await Application.find(query)
       .populate('job')
-      .sort('-createdAt');
-
+      .sort({ createdAt: -1 });
+      
     res.json(applications);
   } catch (error) {
-    console.error('Error fetching applications:', error);
+    console.error('Error in getAllApplications:', error);
     res.status(500).json({ error: error.message });
   }
 };
@@ -320,6 +318,12 @@ exports.sendShortlistedApplications = async (req, res) => {
           <p><strong>AI Score:</strong> ${app.aiScore}/10</p>
           <p><strong>AI Summary:</strong> ${app.aiSummary}</p>
           <p><strong>Date Received:</strong> ${new Date(app.createdAt).toLocaleDateString()}</p>
+          <p><strong>Attachments:</strong></p>
+          <ul style="margin-left: 20px;">
+            ${app.attachments.map(attachment => `
+              <li>${attachment.filename}</li>
+            `).join('')}
+          </ul>
           <p><strong>Email Body:</strong></p>
           <div style="margin-left: 20px;">${app.emailBody}</div>
         </div>
@@ -331,7 +335,7 @@ exports.sendShortlistedApplications = async (req, res) => {
     const message = [
       `Content-Type: multipart/mixed; boundary=${boundary}`,
       'MIME-Version: 1.0',
-      `To: ${req.user.email}`,  // Use the authenticated user's email from req.user
+      `To: ${req.user.email}`,
       `Subject: Shortlisted Applications for ${applications[0].job.title}`,
       '',
       `--${boundary}`,

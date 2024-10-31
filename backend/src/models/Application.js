@@ -12,6 +12,11 @@ const applicationSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Job'
   },
+  processedBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    required: true
+  },
   applicantName: String,
   applicantEmail: String,
   resumeText: String,
@@ -34,5 +39,7 @@ const applicationSchema = new mongoose.Schema({
     threadId: String
   }
 });
+
+applicationSchema.index({ processedBy: 1, job: 1 });
 
 module.exports = mongoose.model('Application', applicationSchema);

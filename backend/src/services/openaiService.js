@@ -30,7 +30,7 @@ class OpenAIService {
       `;
 
       const completion = await this.openai.chat.completions.create({
-        model: "gpt-3.5-turbo",
+        model: "gpt-4o-mini",
         messages: [
           {
             role: "system",
@@ -42,7 +42,7 @@ class OpenAIService {
           }
         ],
         temperature: 0.7,
-        max_tokens: 150
+        max_tokens: 100
       });
       
       let responseText = completion.choices[0].message.content;
