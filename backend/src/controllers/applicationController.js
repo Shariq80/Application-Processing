@@ -6,10 +6,15 @@ const resumeParserService = require('../services/resumeParserService');
 const mongoose = require('mongoose');
 
 exports.fetchEmails = async (req, res) => {
+  console.log('\n=== Starting Email Fetch Process ===');
+  console.log('User:', req.user.email);
+  console.log('Requested Job Title:', req.query.jobTitle);
+  
   try {
     const { jobTitle } = req.query;
     
     if (!jobTitle) {
+      console.log('Error: No job title provided');
       return res.status(400).json({ error: 'Job title is required' });
     }
 
@@ -18,14 +23,20 @@ exports.fetchEmails = async (req, res) => {
     });
     
     if (!existingJob) {
+      console.log(`No job found matching "${jobTitle}"`);
       return res.status(404).json({ 
         error: `No job found matching "${jobTitle}". Please create the job first.` 
       });
     }
 
+    console.log('Found matching job:', existingJob.title);
+    console.log('Connecting to Gmail...');
+    
     const gmail = await gmailService.getAuthorizedClient();
+    console.log('Gmail connection established');
     
     // Search for unread emails with attachments
+    console.log('Searching for unread emails with attachments...');
     const searchQuery = `has:attachment`;
     const messagesResponse = await gmail.users.messages.list({
       userId: 'me',
@@ -34,20 +45,26 @@ exports.fetchEmails = async (req, res) => {
     });
 
     const messages = messagesResponse.data.messages || [];
-    const processedEmails = [];
+    console.log(`Found ${messages.length} unread messages total`);
 
-    // Get all existing message IDs for this job to avoid reprocessing
+    // Get existing message IDs
     const existingMessageIds = await Application.distinct('emailMetadata.messageId', {
       job: existingJob._id
     });
+    console.log(`Found ${existingMessageIds.length} previously processed messages for this job`);
+
+    const processedEmails = [];
+    let skippedCount = 0;
+    let processedCount = 0;
 
     for (const message of messages) {
       try {
-        // Skip if already processed
         if (existingMessageIds.includes(message.id)) {
+          skippedCount++;
           continue;
         }
 
+        console.log(`\nProcessing message ID: ${message.id}`);
         const messageData = await gmail.users.messages.get({
           userId: 'me',
           id: message.id,
@@ -56,20 +73,27 @@ exports.fetchEmails = async (req, res) => {
 
         const headers = messageData.data.payload.headers;
         const subject = headers.find(h => h.name === 'Subject')?.value || '';
+        console.log('Email subject:', subject);
 
         if (!subject.toLowerCase().includes(jobTitle.toLowerCase())) {
+          console.log('Subject does not match job title, skipping...');
           continue;
         }
 
+        console.log('Processing email content and attachments...');
         const processedEmail = await this.processEmail(messageData.data, jobTitle, req.user._id);
+        
         if (processedEmail) {
           processedEmail.emailMetadata = {
             messageId: message.id,
             threadId: messageData.data.threadId
           };
           await processedEmail.save();
-          
           processedEmails.push(processedEmail);
+          processedCount++;
+          
+          console.log('Email processed successfully');
+          console.log('Marking email as read...');
           
           await gmail.users.messages.modify({
             userId: 'me',
@@ -78,16 +102,21 @@ exports.fetchEmails = async (req, res) => {
               removeLabelIds: ['UNREAD']
             }
           });
-          console.log(`Successfully processed and marked as read: ${message.id}`);
         }
       } catch (error) {
         console.error('Failed to process email:', {
           messageId: message.id,
-          error: error.message,
-          stack: error.stack
+          error: error.message
         });
       }
     }
+
+    console.log('\n=== Email Fetch Process Complete ===');
+    console.log('Summary:');
+    console.log(`- Total unread messages: ${messages.length}`);
+    console.log(`- Skipped (already processed): ${skippedCount}`);
+    console.log(`- Successfully processed: ${processedCount}`);
+    console.log(`- Failed to process: ${messages.length - skippedCount - processedCount}`);
 
     res.json({ 
       success: true, 

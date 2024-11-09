@@ -17,12 +17,16 @@ export const AuthProvider = ({ children }) => {
   const checkAuthStatus = useCallback(async () => {
     try {
       const token = getStoredToken();
-      if (!token) {
+      const userId = localStorage.getItem('userId');
+      
+      if (!token || !userId) {
         setLoading(false);
         return;
       }
       
       api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+      api.defaults.headers.common['x-user-id'] = userId;
+      
       const response = await api.get('/auth/check');
       setUser(response.data);
     } catch (error) {
