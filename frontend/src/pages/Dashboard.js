@@ -16,6 +16,7 @@ export default function Dashboard() {
   const navigate = useNavigate();
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [gmailAccounts, setGmailAccounts] = useState([]);
 
   const fetchJobs = async () => {
     try {
@@ -59,8 +60,19 @@ export default function Dashboard() {
     }
   };
 
+  const fetchGmailAccounts = async () => {
+    try {
+      const response = await api.get('/auth/gmail/accounts');
+      setGmailAccounts(response.data);
+    } catch (error) {
+      console.error('Failed to fetch Gmail accounts:', error);
+      toast.error('Failed to fetch Gmail accounts');
+    }
+  };
+
   useEffect(() => {
     fetchJobs();
+    fetchGmailAccounts();
   }, []);
 
   const handleGoogleAuth = async () => {
@@ -75,7 +87,7 @@ export default function Dashboard() {
       const authUrl = response.data.url;
 
       // Add state parameter with token
-      const urlWithToken = `${authUrl}&state=${encodeURIComponent(token)}`;
+      const urlWithToken = `${authUrl}&state=${token}`;
       
       const popup = window.open(
         urlWithToken,
@@ -83,13 +95,18 @@ export default function Dashboard() {
         'width=500,height=600'
       );
 
-      const cleanup = handleOAuthCallback(async () => {
-        popup.close();
-        toast.success('Gmail connected successfully');
-        await fetchJobs();
+      window.addEventListener('message', async (event) => {
+        if (event.origin !== window.location.origin) return;
+        
+        if (event.data.type === 'oauth-callback' && event.data.success) {
+          popup.close();
+          toast.success('Gmail account connected successfully');
+          // Refresh Gmail accounts list if needed
+          if (typeof fetchGmailAccounts === 'function') {
+            await fetchGmailAccounts();
+          }
+        }
       });
-
-      return () => cleanup();
     } catch (error) {
       console.error('Google auth error:', error);
       toast.error('Failed to connect Gmail');

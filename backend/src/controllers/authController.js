@@ -51,63 +51,59 @@ exports.handleGoogleCallback = async (req, res) => {
   try {
     const { code, state } = req.query;
     
-    // If no token in headers, try to get it from state
-    if (!req.headers.authorization && state) {
-      req.headers.authorization = `Bearer ${state}`;
-    }
-    
-    // Verify the token and get user
-    const token = req.headers.authorization?.split(' ')[1];
-    if (!token) {
-      return res.status(401).json({ error: 'Access token required' });
+    // Get user from token (state contains the JWT token)
+    if (!state) {
+      return res.status(401).json({ error: 'Authentication token required' });
     }
 
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    const user = await User.findById(decoded.userId);
-    
-    if (!user) {
-      return res.status(401).json({ error: 'User not found' });
-    }
+    try {
+      const decoded = jwt.verify(state, process.env.JWT_SECRET);
+      const user = await User.findById(decoded.userId);
+      if (!user) {
+        return res.status(401).json({ error: 'User not found' });
+      }
+      
+      // Use the updated handleCallback method
+      const { tokens, email } = await gmailService.handleCallback(code);
 
-    // Set user in request for the rest of the handler
-    req.user = user;
-    
-    // Use the updated handleCallback method
-    const { tokens, email } = await gmailService.handleCallback(code);
+      // Check if this Gmail is already connected by any user
+      const existingCredential = await OAuthCredential.findOne({ email });
+      if (existingCredential) {
+        return res.status(400).json({ 
+          error: 'This Gmail account is already connected to a user' 
+        });
+      }
 
-    // Check if this Gmail is already connected
-    const existingCredential = await OAuthCredential.findOne({ 
-      email 
-    });
-
-    if (existingCredential) {
-      return res.status(400).json({ 
-        error: 'This Gmail account is already connected' 
+      // Save new credentials
+      const credential = new OAuthCredential({
+        ...tokens,
+        userId: user._id,
+        email,
+        isDefault: false
       });
+      
+      await credential.save();
+
+      // Set as user's preferred account if they don't have one
+      if (!user.preferredGmailId) {
+        user.preferredGmailId = credential._id;
+        await user.save();
+      }
+
+      res.json({ 
+        success: true, 
+        message: 'Gmail account connected successfully' 
+      });
+    } catch (jwtError) {
+      return res.status(401).json({ error: 'Invalid authentication token' });
     }
-
-    // Save new credentials
-    const credential = new OAuthCredential({
-      ...tokens,
-      userId: user._id,
-      email,
-      isDefault: false
-    });
-    
-    await credential.save();
-
-    // Set as user's preferred account if they don't have one
-    if (!user.preferredGmailId) {
-      user.preferredGmailId = credential._id;
-      await user.save();
-    }
-
-    res.json({ 
-      success: true, 
-      message: 'Gmail account connected successfully' 
-    });
   } catch (error) {
     console.error('OAuth callback error:', error);
+    if (error.code === 11000) {
+      return res.status(400).json({ 
+        error: 'You have already connected this Gmail account' 
+      });
+    }
     res.status(500).json({ error: error.message });
   }
 };

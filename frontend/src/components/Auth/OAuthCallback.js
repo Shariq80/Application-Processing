@@ -1,5 +1,4 @@
-import { useEffect, useState } from 'react';
-import { CheckCircleIcon, XCircleIcon } from '@heroicons/react/24/outline';
+import { useState, useEffect } from 'react';
 import api from '../../services/api';
 
 export default function OAuthCallback() {
@@ -11,43 +10,34 @@ export default function OAuthCallback() {
       try {
         const urlParams = new URLSearchParams(window.location.search);
         const code = urlParams.get('code');
+        const state = urlParams.get('state'); // Get the token from state
         
-        if (!code) {
+        if (!code || !state) {
           setStatus('error');
-          setMessage('No authorization code found');
+          setMessage('Missing required parameters');
           return;
         }
 
-        // Get the auth token from localStorage
-        const token = localStorage.getItem('token');
-        if (!token) {
-          setStatus('error');
-          setMessage('Authentication token not found');
-          return;
-        }
-
-        // Set the authorization header for this request
-        api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
-        
-        const response = await api.get(`/auth/google/callback?code=${code}`);
+        const response = await api.get(`/auth/google/callback?code=${code}&state=${state}`);
         
         if (response.data.success) {
           if (window.opener) {
-            window.opener.postMessage({ type: 'oauth-callback', success: true }, window.location.origin);
+            window.opener.postMessage({ 
+              type: 'oauth-callback', 
+              success: true 
+            }, window.location.origin);
           }
           
           setStatus('success');
-          setMessage(response.data.message || 'Gmail connected successfully! This window will close shortly.');
+          setMessage('Gmail connected successfully! This window will close shortly.');
           
           setTimeout(() => {
             window.close();
           }, 2000);
-        } else {
-          throw new Error(response.data.error || 'Authentication failed');
         }
       } catch (error) {
         setStatus('error');
-        setMessage(error.response?.data?.error || error.message || 'Authentication failed');
+        setMessage(error.response?.data?.error || 'Failed to connect Gmail account');
       }
     };
 
