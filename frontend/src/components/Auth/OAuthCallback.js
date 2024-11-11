@@ -18,11 +18,20 @@ export default function OAuthCallback() {
           return;
         }
 
-        // Call the backend to process the code
+        // Get the auth token from localStorage
+        const token = localStorage.getItem('token');
+        if (!token) {
+          setStatus('error');
+          setMessage('Authentication token not found');
+          return;
+        }
+
+        // Set the authorization header for this request
+        api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+        
         const response = await api.get(`/auth/google/callback?code=${code}`);
         
         if (response.data.success) {
-          // Notify the opener window about success
           if (window.opener) {
             window.opener.postMessage({ type: 'oauth-callback', success: true }, window.location.origin);
           }
@@ -30,7 +39,6 @@ export default function OAuthCallback() {
           setStatus('success');
           setMessage(response.data.message || 'Gmail connected successfully! This window will close shortly.');
           
-          // Close the window after showing success message
           setTimeout(() => {
             window.close();
           }, 2000);
@@ -47,35 +55,31 @@ export default function OAuthCallback() {
   }, []);
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 p-4">
-      <div className="max-w-md w-full bg-white rounded-lg shadow p-6 text-center">
-        {status === 'processing' && (
-          <div className="animate-pulse">
-            <div className="text-lg text-gray-600">Processing authentication...</div>
-          </div>
-        )}
-        
-        {status === 'success' && (
-          <>
-            <CheckCircleIcon className="mx-auto h-12 w-12 text-green-500" />
-            <h2 className="mt-4 text-xl font-semibold text-gray-900">Authentication Successful</h2>
-            <p className="mt-2 text-sm text-gray-500">{message}</p>
-          </>
-        )}
-        
-        {status === 'error' && (
-          <>
-            <XCircleIcon className="mx-auto h-12 w-12 text-red-500" />
-            <h2 className="mt-4 text-xl font-semibold text-gray-900">Authentication Failed</h2>
-            <p className="mt-2 text-sm text-gray-500">{message}</p>
-            <button
-              onClick={() => window.close()}
-              className="mt-4 text-sm text-indigo-600 hover:text-indigo-500"
-            >
-              Close Window
-            </button>
-          </>
-        )}
+    <div className="min-h-screen flex items-center justify-center bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
+      <div className="max-w-md w-full space-y-8">
+        <div className="text-center">
+          {status === 'processing' && (
+            <>
+              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600 mx-auto"></div>
+              <h2 className="mt-6 text-3xl font-extrabold text-gray-900">
+                Processing...
+              </h2>
+            </>
+          )}
+          {status === 'success' && (
+            <h2 className="mt-6 text-3xl font-extrabold text-green-600">
+              Success!
+            </h2>
+          )}
+          {status === 'error' && (
+            <h2 className="mt-6 text-3xl font-extrabold text-red-600">
+              Error
+            </h2>
+          )}
+          <p className="mt-2 text-sm text-gray-600">
+            {message}
+          </p>
+        </div>
       </div>
     </div>
   );

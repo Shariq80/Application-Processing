@@ -4,6 +4,7 @@ const Application = require('../models/Application');
 const Job = require('../models/Job');
 const resumeParserService = require('../services/resumeParserService');
 const mongoose = require('mongoose');
+const OAuthCredential = require('../models/OAuthCredential');
 
 exports.fetchEmails = async (req, res) => {
   console.log('\n=== Starting Email Fetch Process ===');
@@ -29,10 +30,13 @@ exports.fetchEmails = async (req, res) => {
       });
     }
 
-    console.log('Found matching job:', existingJob.title);
-    console.log('Connecting to Gmail...');
     
-    const gmail = await gmailService.getAuthorizedClient();
+    // Get the active Gmail account
+    const activeCredential = await OAuthCredential.getCredentials(req.user._id);
+    console.log('Using Gmail account:', activeCredential.email);
+    
+    // Get authorized client with specific credentials
+    const gmail = await gmailService.getAuthorizedClient(req.user._id);
     console.log('Gmail connection established');
     
     // Search for unread emails with attachments
@@ -64,7 +68,6 @@ exports.fetchEmails = async (req, res) => {
           continue;
         }
 
-        console.log(`\nProcessing message ID: ${message.id}`);
         const messageData = await gmail.users.messages.get({
           userId: 'me',
           id: message.id,
@@ -73,14 +76,11 @@ exports.fetchEmails = async (req, res) => {
 
         const headers = messageData.data.payload.headers;
         const subject = headers.find(h => h.name === 'Subject')?.value || '';
-        console.log('Email subject:', subject);
 
         if (!subject.toLowerCase().includes(jobTitle.toLowerCase())) {
-          console.log('Subject does not match job title, skipping...');
           continue;
         }
 
-        console.log('Processing email content and attachments...');
         const processedEmail = await this.processEmail(messageData.data, jobTitle, req.user._id);
         
         if (processedEmail) {
@@ -91,9 +91,6 @@ exports.fetchEmails = async (req, res) => {
           await processedEmail.save();
           processedEmails.push(processedEmail);
           processedCount++;
-          
-          console.log('Email processed successfully');
-          console.log('Marking email as read...');
           
           await gmail.users.messages.modify({
             userId: 'me',

@@ -14,6 +14,11 @@ const userSchema = new mongoose.Schema({
   password: {
     type: String,
     required: true
+  },
+  preferredGmailId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'OAuthCredential',
+    default: null
   }
 }, { timestamps: true });
 

@@ -1,6 +1,7 @@
 const { google } = require('googleapis');
 const OAuthCredential = require('../models/OAuthCredential');
 const resumeParserService = require('./resumeParserService');
+const User = require('../models/User');
 
 class GmailService {
   constructor() {
@@ -8,17 +9,28 @@ class GmailService {
     this.gmail = null;
   }
 
+  createOAuth2Client() {
+    return new google.auth.OAuth2(
+      process.env.GOOGLE_CLIENT_ID,
+      process.env.GOOGLE_CLIENT_SECRET,
+      process.env.GOOGLE_REDIRECT_URI
+    );
+  }
+
   async getAuthUrl() {
     this.initializeOAuth2Client();
-    const scopes = [
+    const SCOPES = [
       'https://www.googleapis.com/auth/gmail.readonly',
       'https://www.googleapis.com/auth/gmail.modify',
-      'https://www.googleapis.com/auth/gmail.send'
+      'https://www.googleapis.com/auth/gmail.send',
+      'https://www.googleapis.com/auth/userinfo.email',
+      'https://www.googleapis.com/auth/userinfo.profile',
+      'openid'
     ];
 
     return this.oauth2Client.generateAuthUrl({
       access_type: 'offline',
-      scope: scopes,
+      scope: SCOPES,
       prompt: 'consent',
       include_granted_scopes: true
     });
@@ -31,108 +43,59 @@ class GmailService {
         process.env.GOOGLE_CLIENT_SECRET,
         process.env.GOOGLE_REDIRECT_URI
       );
-      // Increase max listeners
       this.oauth2Client.setMaxListeners(20);
     }
   }
 
   async handleCallback(code) {
     try {
-
       if (!code) {
         throw new Error('Authorization code is required');
       }
 
-      // Check if we already have valid credentials
-      const existingCreds = await OAuthCredential.findOne({});
-      if (existingCreds && existingCreds.access_token) {
-        return {
-          access_token: existingCreds.access_token,
-          refresh_token: existingCreds.refresh_token,
-          expiry_date: existingCreds.expiry_date,
-          scope: existingCreds.scope,
-          token_type: existingCreds.token_type
-        };
-      }
-
-      // Clear any existing credentials
-      this.oauth2Client = new google.auth.OAuth2(
-        process.env.GOOGLE_CLIENT_ID,
-        process.env.GOOGLE_CLIENT_SECRET,
-        process.env.GOOGLE_REDIRECT_URI
-      );
-
-      // Get tokens
+      this.oauth2Client = this.createOAuth2Client();
       const { tokens } = await this.oauth2Client.getToken(code);
       
-
-      if (!tokens.access_token) {
-        throw new Error('No access token received');
-      }
-
-      // Save tokens first
-      await this.saveTokens(tokens);
-
-      // Verify saved tokens
-      const savedCreds = await OAuthCredential.findOne({});
-
-      // Then set credentials
+      // Get Gmail address
       this.oauth2Client.setCredentials(tokens);
+      const gmail = google.gmail({ version: 'v1', auth: this.oauth2Client });
+      const profile = await gmail.users.getProfile({ userId: 'me' });
       
-      return tokens;
-    } catch (error) {
+      return {
+        tokens,
+        email: profile.data.emailAddress
+      };
 
-      if (error.message.includes('invalid_grant')) {
-        // Don't clear credentials if we already have valid ones
-        const existingCreds = await OAuthCredential.findOne({});
-        if (!existingCreds || !existingCreds.access_token) {
-          await OAuthCredential.deleteMany({});
-        }
-        throw new Error('Authorization code expired or already used. Please start the OAuth process again if needed.');
-      }
+    } catch (error) {
+      console.error('HandleCallback Error:', error);
       throw error;
     }
   }
 
-  async saveTokens(tokens) {
+  async getAuthorizedClient(userId) {
     try {
-      const result = await OAuthCredential.findOneAndUpdate(
-        {}, 
-        {
-          access_token: tokens.access_token,
-          refresh_token: tokens.refresh_token,
-          scope: tokens.scope,
-          token_type: tokens.token_type,
-          expiry_date: tokens.expiry_date,
-        },
-        { upsert: true, new: true }
-      );
-    } catch (error) {
-      console.error('SaveTokens Error:', error);
-      throw error;
-    }
-  }
-
-  async getAuthorizedClient() {
-    try {
+      const credentials = await OAuthCredential.getCredentials(userId);
+      
       if (this.gmail) {
         return this.gmail;
       }
 
-      this.initializeOAuth2Client();
-      const credentials = await OAuthCredential.getCredentials();
-      
+      this.oauth2Client = this.createOAuth2Client();
       this.oauth2Client.setCredentials({
         access_token: credentials.access_token,
         refresh_token: credentials.refresh_token,
         expiry_date: credentials.expiry_date,
+        token_type: credentials.token_type,
+        scope: credentials.scope
       });
 
-      // Set up token refresh handler only once
       if (!this.oauth2Client.listenerCount('tokens')) {
         this.oauth2Client.on('tokens', async (tokens) => {
           if (tokens.refresh_token) {
-            await this.saveTokens(tokens);
+            await OAuthCredential.findOneAndUpdate(
+              { _id: credentials._id },
+              { ...tokens }
+            );
           }
         });
       }
@@ -144,7 +107,6 @@ class GmailService {
       throw error;
     }
   }
-
 
   async getEmailContent(messageId) {
     try {

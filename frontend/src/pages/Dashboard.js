@@ -6,6 +6,7 @@ import EditJobModal from '../components/Jobs/EditJobModal';
 import DeleteConfirmModal from '../components/Applications/DeleteConfirmModal';
 import { toast } from 'react-hot-toast';
 import { handleOAuthCallback } from '../services/oauth';
+import GmailAccountSelector from '../components/GmailAccountSelector';
 
 export default function Dashboard() {
   const [jobs, setJobs] = useState([]);
@@ -64,19 +65,30 @@ export default function Dashboard() {
 
   const handleGoogleAuth = async () => {
     try {
+      const token = localStorage.getItem('token');
+      if (!token) {
+        toast.error('Please log in first');
+        return;
+      }
+
       const response = await api.get('/auth/google/url');
+      const authUrl = response.data.url;
+
+      // Add state parameter with token
+      const urlWithToken = `${authUrl}&state=${encodeURIComponent(token)}`;
+      
       const popup = window.open(
-        response.data.url,
+        urlWithToken,
         'Google Auth',
         'width=500,height=600'
       );
-  
+
       const cleanup = handleOAuthCallback(async () => {
         popup.close();
         toast.success('Gmail connected successfully');
         await fetchJobs();
       });
-  
+
       return () => cleanup();
     } catch (error) {
       console.error('Google auth error:', error);
@@ -240,6 +252,25 @@ export default function Dashboard() {
           }}
         />
       )}
+
+      <div className="mt-8 bg-white shadow sm:rounded-lg">
+        <div className="px-4 py-5 sm:p-6">
+          <h3 className="text-lg font-medium leading-6 text-gray-900">
+            Gmail Account Management
+          </h3>
+          
+          <GmailAccountSelector />
+          
+          <div className="mt-4">
+            <button
+              onClick={handleGoogleAuth}
+              className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-indigo-600 hover:bg-indigo-700"
+            >
+              Connect New Gmail Account
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

@@ -9,15 +9,36 @@ const oAuthCredentialSchema = new mongoose.Schema({
   lastUpdated: {
     type: Date,
     default: Date.now
-  }
+  },
+  userId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User'
+  },
+  isDefault: {
+    type: Boolean,
+    default: false
+  },
+  email: String
 }, { timestamps: true });
 
-// We'll only ever have one document for the shared Gmail account
-oAuthCredentialSchema.statics.getCredentials = async function() {
-  const credentials = await this.findOne({});
+oAuthCredentialSchema.statics.getCredentials = async function(userId) {
+  let credentials = await this.findOne({ userId });
+  if (!credentials) {
+    credentials = await this.findOne({ isDefault: true });
+  }
   if (!credentials) {
     throw new Error('OAuth credentials not found');
   }
+  return credentials;
+};
+
+oAuthCredentialSchema.statics.getUserCredentials = async function(userId) {
+  const credentials = await this.find({ 
+    $or: [
+      { userId },
+      { isDefault: true }
+    ]
+  });
   return credentials;
 };
 
